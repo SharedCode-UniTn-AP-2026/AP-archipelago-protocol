@@ -778,6 +778,24 @@ does not achieve --- it keeps honest code correct, and it stops nothing at all i
 simply stores an old token and sends it again, which is why the \admiralty{} checks the round
 number as well.
 
+The \texttt{action} a \texttt{Submit} carries is one of the actions the \MD{} lists:
+
+\begin{lstlisting}
+#[non_exhaustive]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Action {
+    Move { to: Cell },
+    Moor { island: IslandId },
+    AskClue,
+    Bombard { target: ShipId },
+    ProposeAlliance { to: ShipId },
+    AcceptAlliance { proposer: ShipId },
+    BreakAlliance,
+    Declare,
+    Hold,
+}
+\end{lstlisting}
+
 \subsection{The order of business}
 
 For each round the \admiralty:
