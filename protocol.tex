@@ -996,7 +996,7 @@ pub struct Delivered {
 \end{lstlisting}
 
 \textbf{The sender is stamped by the \admiralty{} and cannot be forged.} A \ship{} chooses what it
-says and to whom; who it is comes from the endpoint the \texttt{Letter} arrived on. Everything in
+says and to whom; who it is comes from the endpoint the \texttt{Letter} arrived on. Everything else in
 it may be a lie.
 
 \clues{} travel as \texttt{Clue} values, because the receiver evalueates them. \texttt{text} is for everything else and only the \ship{} it is addressed to read it.
@@ -1023,15 +1023,16 @@ The \admiralty{} delivery is not guaranteed, because there is no acknowledgement
 
 \subsection{Why it is relayed and not direct}
 
-There must be an authority to time out a stalled \ship{} and that action should be done in front of an audience.
-% Because two independently written student components that wait on each other will wait forever. A
-% \ship{} blocked on a peer during its own round stalls nothing but itself --- the \admiralty{} will
-% time it out --- but a \ship{} that has staked its turn on an answer that never comes has wasted the
-% round, and at the fair it will do so in front of an audience.
-Uncooperativeness is also a legitimate strategy here. 
-% A \ship{} that depends on being answered is a
-% \ship{} its rivals can freeze simply by saying nothing, and the relay is what keeps that from being
-% a winning move: the mail never blocks anybody, because nobody ever waits for it.
+A \ship{} is responsible for making progress without waiting indefinitely for a response. If it
+stalls while waiting for another \ship{}, the \admiralty{} may time it out; the \ship{} loses the
+round, and the timeout is visible to the other participants.
+
+Uncooperativeness is also a legitimate strategy here. A rival may refuse to answer a request,
+withhold information, or send a message that is deliberately unhelpful. That may prevent
+coordination, but it must not prevent the other \ship{} from taking its own action: a \ship{} that
+depends on being answered could otherwise be frozen simply by silence. This is why the relay is
+non-blocking: sending a letter does not wait for delivery or acknowledgement, and a \ship{} continues
+to play even when every rival ignores it.
 
 \subsection{The two rules}
 
