@@ -2,6 +2,8 @@
 This repo will contain the file with the corrected version of the "protocol" doc.
 All corrections will be pointed out through issues or pull requests, and discussed together in class.
 
+You can find the preview of the most recent `Protocol.pdf` [here on the published Github Pages](https://sharedcode-unitn-ap-2026.github.io/AP-archipelago-protocol/).
+
 ## How to Issue/Pull Request
 To keep everything manageable and coherent with the rest, please follow these rules when submitting an Issue or a Pull Request:
 - **Keep them atomic**, a PR or issue must address exactly **one** problem at a time. Avoid working continuously on a single branch of your fork, as this will stack all your unrelated modifications into a single PR.
