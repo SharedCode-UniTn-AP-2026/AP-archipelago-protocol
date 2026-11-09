@@ -2,6 +2,7 @@ name: Build LaTeX
 
 on:
   push:
+    branches: [main]
     paths:
       - '**.tex'
       - '**.sty'
@@ -21,9 +22,8 @@ jobs:
     timeout-minutes: 5
 
     steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: main
+      - name: Checkout
+        uses: actions/checkout@v7
 
       - name: Set up TeX Live
         uses: zauguin/install-texlive@v4
@@ -32,35 +32,8 @@ jobs:
             scheme-basic titling parskip cleveref listings caption xcolor psnfss graphics latexmk
 
       - name: Compile
-        run: latexmk -pdf -interaction=nonstopmode -halt-on-error -file-line-error protocol.tex
-
-
-      # - name: Push PDF to pdf-result
-      #   run: |
-      #     git config user.name "github-actions[bot]"
-      #     git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-      #     cp protocol.pdf "$RUNNER_TEMP/protocol.pdf"
-
-      #     if git ls-remote --exit-code --heads origin pdf-result >/dev/null 2>&1; then
-      #       git fetch origin pdf-result
-      #       git worktree add /tmp/pdf-result origin/pdf-result
-      #     else
-      #       git worktree add --detach /tmp/pdf-result
-      #       git -C /tmp/pdf-result checkout --orphan pdf-result
-      #     fi
-
-      #     cp "$RUNNER_TEMP/protocol.pdf" /tmp/pdf-result/protocol.pdf
-
-      #     cd /tmp/pdf-result
-      #     git add protocol.pdf
-
-      #     if ! git diff --cached --quiet; then
-      #       git commit -m "Update generated protocol PDF"
-      #       git push origin HEAD:pdf-result
-      #     else
-      #       echo "PDF unchanged; no commit needed."
-      #     fi
+        run: |
+          latexmk -pdf -interaction=nonstopmode -halt-on-error -file-line-error protocol.tex
 
       - name: Generate release timestamp
         id: timestamp
@@ -75,10 +48,49 @@ jobs:
           files: protocol.pdf
           make_latest: true
 
-      - name: Upload PDF
+      - name: Upload PDF artifact
         uses: actions/upload-artifact@v7
         with:
           name: protocol
           path: protocol.pdf
           if-no-files-found: error
           retention-days: 30
+
+      - name: Prepare GitHub Pages directory
+        run: |
+          mkdir -p public
+          cp protocol.pdf public/
+          cat > public/index.html <<'EOF'
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <meta http-equiv="refresh" content="0; url=protocol.pdf">
+            <title>Protocol</title>
+          </head>
+          <body>
+            <a href="protocol.pdf">Open protocol PDF</a>
+          </body>
+          </html>
+          EOF
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ./public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
