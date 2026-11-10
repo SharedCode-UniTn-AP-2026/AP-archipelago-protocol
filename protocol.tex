@@ -267,6 +267,8 @@ pub enum Terrain {
     Rock,
     /// Land, and part of an Island's footprint.
     Island(IslandId),
+    /// Land, but not part of an Island's footprint.
+    Cliff
 }
 
 /// The terrain of every cell, and nothing else. Public and fixed for the game.
