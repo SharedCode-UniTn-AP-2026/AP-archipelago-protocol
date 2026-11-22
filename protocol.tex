@@ -794,10 +794,9 @@ knew. Which one is decided entirely by the conflict rule. It is the most consequ
 \section{The \chart's interface}
 \label{proto:chartapi}
 
-The \chart{} owns no channel and sends nothing. The \admiralty{} \emph{calls} it, synchronously,
-and this is the only interface between the two --- which makes it as much a part of what two
-groups must agree on as any message, and the reason it is in this document rather than hidden
-inside whoever wrote the \chart.
+The \chart{} owns no channel and sends nothing: the \admiralty{} \emph{calls} it synchronously.
+This is the only interface between the two, so it must be agreed on like any message, which is
+why it is in this document.
 
 \begin{lstlisting}
 impl Chart {
@@ -825,47 +824,38 @@ impl Chart {
 
 \subsection{Why validate and apply are two functions}
 
-\texttt{ValidatedAction} has no public constructor: it cannot be built outside the \chart's own
-crate, and \texttt{validate} is the only thing that returns one. \texttt{apply} accepts nothing
-else. It is therefore not merely discouraged but \emph{impossible} to apply an unchecked action to
-the game state, and the compiler enforces it rather than a code review.
+\texttt{ValidatedAction} has no public constructor: only \texttt{validate} returns one, and
+\texttt{apply} accepts nothing else. Applying an unchecked action is therefore \emph{impossible},
+enforced by the compiler rather than by code review. A type that callers cannot construct is how
+an invariant is made unforgeable in Rust: it lives in the one function that mints the value, and
+everything downstream may assume it.
 
-This is worth copying elsewhere in your own code. A type whose values a caller cannot construct is
-how you make an invariant unforgeable in Rust: the invariant lives in the one function that mints
-the value, and everything downstream may simply assume it.
+\texttt{apply} cannot fail, as its signature says: if you want to return an error from it, the
+check belongs in \texttt{validate}.
 
-\texttt{apply} cannot fail, and its signature says so. Everything that might have gone wrong was
-decided by \texttt{validate}. If you find yourself wanting to return an error from \texttt{apply},
-the check belongs in \texttt{validate}.
-
-\textbf{Note the one thing the type does not buy you.} A \texttt{ValidatedAction} says the action
-was legal when it was minted; it does not say it is legal now, because it carries no round and no
-state version. Hold one across another \texttt{apply} and it may have gone stale --- the cell it
-names may have filled, its target may have sunk. The \MD{} judges legality at the moment of
-application, so \texttt{validate} and \texttt{apply} must be adjacent calls with nothing between
-them (\cref{proto:rounds}). The type stops you applying an \emph{unchecked} action. Keeping the
-check fresh is the \admiralty's job.
+\textbf{What the type does not guarantee.} A \texttt{ValidatedAction} carries no round or state
+version: it was legal when minted, but held across another \texttt{apply} it may go stale (its
+cell filled, its target sunk). Legality is judged at application time, so \texttt{validate} and
+\texttt{apply} must be adjacent calls (\cref{proto:rounds}). The type prevents applying an
+\emph{unchecked} action; keeping the check fresh is the \admiralty's job.
 
 \subsection{What the \admiralty{} may rely on}
 
 \begin{itemize}
-    \item \texttt{validate} never mutates, so a rejected action leaves the state untouched and the
-      \admiralty{} may call it speculatively;
-    \item \texttt{apply} returns the \texttt{Event}s its action produced, and those events are the
-      only record of what happened;
-    \item \texttt{advance\_round} does three things in this fixed order: increment the round
-      number, so the wind takes its new value; give every \island{} its turn, in ascending order
-      of identifier, so that a \ship{} moored and waiting has waited one round more; determine
-      whether the game has ended --- because somebody declared correctly, because the round cap
-      was reached, or because no \ship{} is left afloat. The order is fixed and the traversal is
-      sorted because both affect the outcome and both must be identical in every implementation;
-    \item \texttt{view\_for} is pure and may be called as often as the \admiralty{} likes;
-    \item there is no sinking step. A \ship{} sinks inside the \texttt{apply} that empties its
+    \item \texttt{validate} never mutates and may be called speculatively: a rejected action leaves
+      the state untouched;
+    \item the \texttt{Event}s returned by \texttt{apply} are the only record of what happened;
+    \item \texttt{advance\_round}, in this fixed order: increments the round (the wind changes),
+      gives every \island{} its turn in ascending identifier order (a moored \ship{} has waited one
+      round more), then checks whether the game has ended (correct declaration, round cap, or no
+      \ship{} afloat). Order and traversal are fixed because both affect the outcome and must be
+      identical in every implementation;
+    \item \texttt{view\_for} is pure and may be called at will;
+    \item there is no sinking step: a \ship{} sinks inside the \texttt{apply} that empties its
       hull, never at the end of a round (see the \MD).
 \end{itemize}
 
-Everything the \chart{} does with these calls --- how a world is generated, what makes an action
-legal, what a view may contain --- is in the \MD{} with the rest of the rules.
+Generation, legality and view contents are specified in the \MD.
 
 \newpage
 \section{Messages between \ships}
