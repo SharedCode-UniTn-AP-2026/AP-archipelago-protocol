@@ -1123,13 +1123,13 @@ The \cartographer{} is optional. A game with nobody watching runs perfectly well
 
 \subsection{Rejections}
 
-A submission the \chart{} refuses is answered, not ignored:
+A submission the \chart{} refuses is answered:
 
 \begin{lstlisting}
 AdmiraltyToShip::Rejected { round: Round, reason: Rejection }
 \end{lstlisting}
 
-\texttt{Rejection} is an enumeration, not a string. Sketch, to be completed by the \WG:
+\texttt{Rejection} is an enumeration. The \WG must complete it:
 
 \begin{lstlisting}
 #[non_exhaustive]
@@ -1150,30 +1150,23 @@ pub enum Rejection {
 when it plays \texttt{Moor}, and refusing to answer when it plays \texttt{AskClue}. One variant
 for one idea.
 
-Whoever wrote the \ship{} cannot ask you what went wrong, and will be debugging late at night
-against an \admiralty{} written by somebody they have never met. A reason they can match on is
-worth a great deal more than a sentence they have to read.
+A machine-matchable reason for \texttt{Rejection} is far more useful than a sentence to read.
+\ship{} and \admiralty{} are written by different authors and this could prevent errors. 
 
 A rejected action leaves the state untouched, and the round proceeds as though the \ship{} had
-played \texttt{Hold}. The \ship{} is not removed from the game for submitting nonsense, however
-much of it it submits.
+played \texttt{Hold}. The \ship{} is not removed from the game for submitting nonsense.
 
 \subsection{Hostile input}
 
-Every value arriving at the \admiralty{} was written by a competitor.
+Every value arriving at the \admiralty{} was written by a competitor. Typed Rust messages prevent
+truncated structs and false length prefixes, but not invalid values.
+%Values like \texttt{Cell} outside the sea, an unknown \texttt{ShipId}, an action for an old round, an outbox with a hundred thousand letters, or a heap-sized \texttt{String}.
 
-That the messages are typed Rust values rather than bytes removes one class of problem and none of
-the others. Nobody can hand you a truncated struct or a length prefix that lies. Everybody can hand
-you a \texttt{Cell} outside the sea, a \texttt{ShipId} that names nobody, an action for a round
-that ended an hour ago, an outbox with a hundred thousand letters in it, or a \texttt{String} the
-size of the heap.
+\textbf{The \admiralty{} must not panic, abort or exit on any message, however absurd.} Validate
+every value before use, including values that appear impossible. Some invalid messages will be
+deliberate.
 
-\textbf{The \admiralty{} must not panic, abort or exit on any message, however absurd.} Somebody
-will send each of the above, some of them on purpose. Treat every value crossing a channel as an
-assertion by an adversary and check it before use --- including the ones that ``obviously'' cannot
-be wrong.
-
-A misbehaving \ship{} may be silenced. The game may not stop.
+A misbehaving \ship{} may be silenced, a bad behaviour of it must never stop the game.
 
 \newpage
 \section{Logging}
