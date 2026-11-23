@@ -132,24 +132,22 @@ wrong --- some will have survived --- and that is also what this exercise is abo
 There are three kinds of participant, and only two of them speak:
 
 \begin{description}
-    \item[The \admiralty] The referee. Exactly one per game. It owns every channel, decides when
-      rounds begin and end, asks the \chart{} to validate and apply actions, and relays messages
+    \item[The \admiralty] The referee. It manages the rounds, asks the \chart{} to validate and apply actions, and relays messages
       between \ships. It knows no rules of its own.
-    \item[A \ship] One thread, one pair of channel endpoints, one action per round. There are
-      exactly six, one on each corner of the sea (see the \MD).
-    \item[The \cartographer] A privileged participant that sees everything and may control the
+    \item[A \ship] There are six of them, one on each corner of the sea (see the \MD).
+    \item[The \cartographer] privileged participant that sees everything and may control the
       game.
 \end{description}
 
-\islands do not appear here. They are objects inside the \chart{} and send nothing.
-
-\ships hold no channel to one another. Everything a \ship{} says to another \ship{} passes through
-the \admiralty. \Cref{proto:mail} explains why.
+%\islands do not appear here. They are objects inside the \chart{} and send nothing.
+Everything said bedtweem \ships passes to the \admiralty. more info at \Cref{proto:mail}.
+% Everything a \ship{} says to another \ship{} passes through
+% the \admiralty. \Cref{proto:mail} explains why.
 
 \subsection{Four message sets}
 \label{proto:foursets}
 
-There are four enumerations, not two:
+There are four enumerations:
 
 \begin{center}
 \begin{tabular}{|l|l|}
@@ -161,10 +159,9 @@ There are four enumerations, not two:
 \end{tabular}
 \end{center}
 
-The split is deliberate and is a design requirement, not tidiness. The complete state of the game
+The split is deliberate and is a design requirement. The complete state of the game
 exists only in \texttt{AdmiraltyToCartographer}. Because a \ship{} cannot receive a value of that
-type, no later change to the code can accidentally hand a \ship{} the omniscient view. If instead
-there were one message set with a flag, that mistake would be one careless line away.
+type.
 
 \textbf{Every enumeration in this document must be \texttt{\#[non\_exhaustive]}}, without
 exception. This protocol will change repeatedly during
@@ -175,17 +172,12 @@ recognise instead of failing to compile --- or worse, compiling and being wrong.
 \section{Geometry}
 \label{proto:geometry}
 
-Hex geometry is provided by a single shared library, written once by contractors and linked by
-every component. \textbf{Do not write your own.} A \ship{} that computes visibility differently
-from the \chart{} will plan moves the \chart{} rejects, and the resulting argument between two
-groups cannot be settled by either of them.
+Hex geometry comes from a single shared library, written once and linked by every component. \textbf{Do not write your own}: if a \ship{} computes distances or visibility differently from the \chart{}, the two will disagree.
 
 \subsection{Coordinates}
 \label{proto:coords}
 
-Cells use \textbf{axial} coordinates $(q, r)$, in a pointy-top layout. A third coordinate
-$s = -q - r$ is implied; the triple $(q, r, s)$ always sums to zero and is convenient for
-arithmetic.
+Cells use \textbf{axial} coordinates $(q, r)$, pointy-top layout. A third coordinate $s = -q - r$ is implied, so $(q, r, s)$ always sums to zero.
 
 \begin{lstlisting}
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -198,19 +190,18 @@ impl Cell {
     pub fn s(self) -> i32 { -self.q - self.r }
     pub fn neighbour(self, direction: Direction) -> Cell;
     pub fn distance (self, other: Cell) -> u32;
+    pub fn neighbours(self) -> [Cell; 6];
+    pub fn disc(self, radius: u32) -> impl Iterator<Item = Cell>;
+    pub fn ring(self, radius: u32) -> impl Iterator<Item = Cell>;
 }
 \end{lstlisting}
 
-Note that \texttt{Cell} derives \texttt{Ord}. This is not decoration: several rules require
-iterating over cells in a fixed order, and an unordered traversal would make the game
-non-reproducible (see the \MD{} on determinism).
+\texttt{Cell} derives \texttt{Ord} on purpose: several rules iterate over cells in a fixed order, and an unordered traversal would make the game non-reproducible.
 
 \subsection{Directions}
 \label{proto:directions}
 
-There are exactly six directions, and no diagonals. This uniformity is the main reason a hex grid
-was chosen over a square one: on a square grid every group would have to decide separately what a
-diagonal costs and whether it can be blocked, and they would decide differently.
+There are exactly six directions and no diagonals.
 
 \begin{center}
 \begin{tabular}{|l|c|c|}
@@ -243,15 +234,9 @@ impl Direction {
 }
 \end{lstlisting}
 
-Turning is therefore addition modulo six. The \textbf{relative angle} between two directions is
-their difference modulo six, folded into the range $0$ to $3$: $0$ means the same direction, $3$
-means directly opposite. The wind rule is expressed in it (\cref{proto:weather}).
+Turning is addition modulo six. The \textbf{relative angle} between two directions is their difference modulo six, folded into the range $0$--$3$ ($0$ = same direction, $3$ = opposite). The wind rule is expressed in it. (\cref{proto:weather}).
 
-That numbering is load-bearing in one other place. \ship{} $i$ starts on corner $i$ (see the
-\MD), and ``corner $i$'' means the cell at distance \texttt{archipelago\_radius} along direction
-$i$. Get the order wrong and six \ships{} start in the wrong places.
-
-\subsection{Distance and ranges}
+The numbering also defines starting positions: \ship{} $i$ starts on corner $i$, which is the cell at distance \texttt{archipelago\_radius} along direction $i$.\subsection{Distance and ranges}
 
 The distance between two cells is
 
@@ -262,16 +247,13 @@ $\mathrm{dist}(a,b) = \frac{|a_q - b_q| + |a_r - b_r| + |a_s - b_s|}{2}$
 It is never negative, so \texttt{Cell::distance} returns \texttt{u32} and compares directly
 against \texttt{vision\_range}, \texttt{bombard\_range} and a \clue's radius without a cast.
 
-The library provides neighbours of a cell, all cells within a given distance (a \emph{disc}), all
-cells at exactly a given distance (a \emph{ring}), and the line between two cells
+The library provides functions for cell neighbours, all cells within a given distance (a \emph{disc}), all cells at an exact distance (a \emph{ring}), and the line between two cells.
 (\fullref{proto:los}).
 
 \subsection{The map}
 \label{proto:map}
 
-The \archipelago{} is the disc of radius \texttt{archipelago\_radius} around the origin, which on
-a hex grid is itself a hexagon. Cells outside it do not exist. Every cell inside is one of four
-kinds:
+The \archipelago{} is the hexagonal disc of radius \texttt{archipelago\_radius} around the origin. Cells outside it do not exist. Every cell inside is one of four kinds:
 
 \begin{lstlisting}
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -282,6 +264,8 @@ pub enum Terrain {
     Rock,
     /// Land, and part of an Island's footprint.
     Island(IslandId),
+    /// Land, but not part of an Island's footprint.
+    Cliff
 }
 
 /// The terrain of every cell, and nothing else. Public and fixed for the game.
@@ -302,16 +286,12 @@ impl Map {
 }
 \end{lstlisting}
 
-\textbf{Land} means \texttt{Island} or \texttt{Cliff}, and \textbf{water} means \texttt{Clear} or
-\texttt{Rock}. Every rule that speaks of land or water means exactly those two sets, so nothing
-has to be restated: land cannot be entered and blocks sight, water can be entered and does not. A
-rock is water by both tests --- enterable and transparent --- and the only thing that
-distinguishes it is what entering it costs (see the \MD).
+\textbf{Land} (\texttt{Island}, \texttt{Cliff}) cannot be entered and blocks sight; \textbf{water} (\texttt{Clear}, \texttt{Rock}) can be entered and does not. A rock differs from clear water only in the cost of entering it.
 
 \subsection{The small types}
 \label{proto:types}
 
-Five more, so that the messages below do not refer to types nobody has written down:
+Defines basic shared types that derive \texttt{Ord} for deterministic sorted traversal:
 
 \begin{lstlisting}
 #[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
@@ -325,16 +305,17 @@ pub type Round = u32;
 
 /// Reproducible randomness. Never the clock, never thread-local.
 pub type Seed = u64;
-\end{lstlisting}
 
-All of them derive \texttt{Ord} for the same reason \texttt{Cell} does: sorted traversal is how
-this project stays reproducible.
+/// Issued in RoundOpen, consumed by Submit. Not Clone/Copy.
+/// A new value for every Ship and every round, drawn so that no Ship can guess it.
+#[derive(PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+pub struct TurnToken(pub u64);
+\end{lstlisting}
 
 \subsection{\texttt{Params}}
 \label{proto:params}
 
-Every numeric rule of the game travels in one struct, handed to the \chart{} when the world is
-generated and to each \ship{} in \texttt{Welcome}:
+All the numeric rules travel in one struct, given to the \chart{} at generation and to each \ship{} in \texttt{Welcome}. 
 
 \begin{lstlisting}
 #[non_exhaustive]
@@ -352,15 +333,7 @@ pub struct Params {
 }
 \end{lstlisting}
 
-Recommended values, and the reasoning behind them, are in the \MD. Two things are \emph{not} in
-this struct and must not be added to it. The number of \ships{} is always six. Rock damage is
-half of \texttt{hull\_strength} rounded up, derived rather than configured, because two parameters
-that must agree are two parameters that will not.
-
-\texttt{\#[non\_exhaustive]} means no other crate can write a \texttt{Params} literal, so this
-crate must also export a way to build one --- a \texttt{Default} carrying the recommended values,
-and a builder or a set of \texttt{with\_} methods on top of it. Without that, nobody can call
-\texttt{generate}, and no group can write a test at a radius other than the default.
+The number of \ships{} (always six) and the rock damage (half of \texttt{hull\_strength}, rounded up) are derived, not configured. Being \texttt{\#[non\_exhaustive]}, \texttt{Params} cannot be built with a literal outside the crate, so we must export a \texttt{Default} and a builder or \texttt{with\_} methods (otherwise nobody can call \texttt{generate}).
 
 \newpage
 \section{Line of sight}
@@ -379,42 +352,30 @@ A cell is visible from another when both hold:
     \item no \textbf{land} cell lies strictly between them along the line joining them.
 \end{itemize}
 
-Endpoints are excluded from the obstruction test. A \ship{} can always see the \island{} it is
-moored at, and an \island{} does not hide itself.
-
-``Land'' means both kinds: an \island's footprint and a cliff block sight identically, and
-\texttt{visible} has no reason to tell them apart. A rock is water and never blocks anything, so a
-\ship{} sitting on one is in plain view.
-
-The range limit matters as much as the obstruction rule. Without it, a \ship{} in open water would
-see the entire \archipelago{} and there would be no fog to speak of, and therefore nothing worth
-trading or lying about.
+Endpoints are excluded from the obstruction test: a \ship{} can always see the \island{} it is
+moored at, and an \island{} does not hide itself. Both kinds of land (\island{} footprints and
+cliffs) block sight identically, whereas a rock is water and never blocks sight, leaving a \ship{}
+on it in plain view. The range limit is as important as obstruction: without it, a \ship{} in open
+water would see the entire \archipelago{}, eliminating fog of war and any reason to trade or lie.
 
 \subsection{Drawing the line}
 \label{proto:losdecide}
 
-``Along the line joining them'' is not self-explanatory on a hex grid, and it is the part of this
-document most likely to be implemented two different ways. It is therefore settled here rather than
-left open.
-
+To avoid divergent implementations on a hex grid, the line-of-sight rule is fixed as follows.
 Interpolate from \emph{from} to \emph{to} in cube coordinates, taking
-$\mathrm{dist}(\mathit{from},\mathit{to}) + 1$ equally spaced samples. Each sample is a point in
-the plane, not yet a cell. For each one, take its \textbf{candidates}: every cell whose centre is
-nearest to that point. Usually there is exactly one. When the point falls on the boundary between
-two cells there are two, and if one ever falls on a vertex there are three; the rule does not care
-how many, only that you keep all of them rather than choosing between them.
+$\mathrm{dist}(\mathit{from},\mathit{to}) + 1$ equally spaced planar samples. For each sample
+point, take its \textbf{candidates}: all cells whose centres are nearest to it (one cell inside a
+hex, two on an edge boundary, or three on a vertex; keep all of them rather than choosing one).
 
 \begin{center}
 A sample is blocked when \emph{every} one of its candidates is land. The line is obstructed when
 any interior sample is blocked.
 \end{center}
 
-An example is worth more than the rule here. A \ship{} at $(0,0)$ looks towards a \ship{} at
-$(2,-1)$. In cube coordinates those are $(0,0,0)$ and $(2,-1,-1)$, and the distance between them is
-$2$, so there are three samples: $t = 0$, $t = 0.5$ and $t = 1$. The first and last are the
-endpoints and are not tested. The middle one falls at $(1, -0.5, -0.5)$, which sits exactly on the
-edge between cell $(1,-1)$ and cell $(1,0)$. Both are candidates and neither is nearer, so what
-happens depends on both:
+For example, a \ship{} at $(0,0)$ looking towards $(2,-1)$ (cube coordinates $(0,0,0)$ and
+$(2,-1,-1)$, distance $2$) produces three samples at $t = 0$, $t = 0.5$ and $t = 1$. The
+endpoints ($t = 0, 1$) are not tested. The interior sample $(1, -0.5, -0.5)$ lies on the edge
+between $(1,-1)$ and $(1,0)$, so both are candidates:
 
 \begin{center}
 \begin{tabular}{|l|l|l|}
@@ -432,84 +393,58 @@ happens depends on both:
 \end{tabular}
 \end{center}
 
-One \island{} cell on that edge does not block the view. Two do.
+One \island{} cell on that edge does not block the view; two do.
 
-Note what the rule does \emph{not} say. The line is straight and fixed, and only the choice of cell
-at a sample is generous. A single land cell sitting squarely on the line, where there is no
-ambiguity about which cell the sample belongs to, blocks the view --- even though a \ship{} could
-plainly sail around that \island{} in a few rounds. \texttt{visible} tests one straight line. It
-never searches for a clear route.
+\texttt{visible} tests a single straight, fixed line and never searches for a clear route: an
+unambiguous single land cell squarely on the line blocks sight, even if a \ship{} could sail around
+that \island{} in a few rounds. Because sight is blocked only when land blocks every candidate at a
+sample, three properties follow directly:
 
-Put another way: sight is blocked only if land blocks every way through. Three questions disappear
-with that rule, which is why it was chosen.
-
-\textbf{There is no tie-break to agree on.} No nudge, no epsilon, no argument about which way to
-round. The usual technique --- offsetting one endpoint by a tiny amount before interpolating ---
-obliges every implementation to use the same tiny amount in the same direction, and that is exactly
-the kind of agreement that does not survive twenty independent implementations. Taking every
-nearest cell removes the question instead of answering it.
+\textbf{There is no tie-break to agree on.} Keeping all nearest cells avoids epsilon offsets or
+rounding conventions that independent implementations might apply differently.
 
 \textbf{Symmetry comes free.} $\mathrm{visible}(a,b) = \mathrm{visible}(b,a)$ holds by
-construction, because reversing the line yields the same samples in the opposite order and the same
-candidate sets. Symmetry need not be imposed, tested for, or patched up afterwards.
+construction, as reversing the line yields the same samples and candidate sets in reverse order.
 
-\textbf{Grazing settles itself.} A line passing exactly between two land cells is blocked; a line
-passing exactly between a land cell and a water cell is not.
+\textbf{Grazing settles itself.} A line passing exactly between two land cells is blocked; one
+between land and water is not.
 
-The price is that vision is slightly generous: two \islands{} whose footprints meet at a shared
-corner do not seal the
-gap between them. That is the right mistake to make. A \ship{} that believes itself hidden and is
-not will lose a game to a rule it cannot see; a \ship{} that believes itself exposed and is not
-will only sail more carefully than it needed to.
-
-Visibility is strictly boolean. A cell is visible or it is not. There is no partial visibility and
-there are no degrees of concealment.
+Consequently, vision is slightly generous: two \islands{} meeting only at a shared corner do not
+seal the gap between them. This errs on the safe side: a \ship{} that mistakenly believes itself
+exposed only sails more carefully, whereas one that mistakenly believes itself hidden loses to an
+unseen rule. Visibility is strictly boolean, with no partial visibility or degrees of concealment.
 
 \subsection{Test vectors}
 \label{proto:vectors}
 
-Because this function is used both to decide what a \ship{} is told and to decide whether a \ship{}
-may fire, its definition must be pinned down by more than prose.
+Because \texttt{visible} determines both what a \ship{} is told and whether it may fire, the \WG{}
+must pin down its definition by publishing a file of \textbf{test vectors} (small maps with cell
+pairs and expected answers), included in the conformance suite (\OD). Both the shared library and
+any \ship{} computing visibility for its own planning must pass them.
 
-The \WG{} must publish a file of \textbf{test vectors}: a set of small maps together with, for
-each, a list of cell pairs and the expected answer. Every implementation --- the shared library,
-and any \ship{} that computes visibility for its own planning --- must pass them. The conformance
-suite (\OD) includes them.
-
-Write the vectors to be nasty. Include lines exactly between two cells, lines that graze corners,
-lines that pass between two land cells and between one land and one water cell, pairs at exactly
-the range limit, pairs at range limit plus one, a \ship{} adjacent to an \island{} on every one of
-the six sides, and a \ship{} entirely surrounded by land.
+The vectors must cover edge cases: lines passing exactly between two cells (two land cells, or one
+land and one water), lines grazing corners, pairs at the exact range limit and at range limit plus
+one, a \ship{} adjacent to an \island{} on each of the six sides, and a \ship{} entirely surrounded
+by land.
 
 \newpage
 \section{Weather}
 \label{proto:weather}
 
-The wind is not stored and updated. It is a \textbf{pure function of the weather seed and the round
-number}:
+The wind is stateless, determined purely by a function of the seed and round number:
 
 \begin{lstlisting}
 pub fn wind_at(weather_seed: Seed, round: Round) -> Direction;
 \end{lstlisting}
 
-There is no accumulated weather state that two implementations could let drift apart, no update
-step to get wrong, and any component can compute the wind for any round without having observed
-the rounds in between --- which is what lets a \ship{} plan a route several rounds ahead.
+This allows a \ship{} to compute future rounds directly with no accumulated state to drift.
+The returned \texttt{Direction} indicates where the wind blows from, shutting the course whose
+relative angle to it is $0$ (opposite to the wind).
 
-\textbf{The \texttt{Direction} returned is the direction the wind blows \emph{from}}, exactly as
-at sea: a north wind comes out of the north. Sailing into the wind therefore means sailing along
-that same direction, so the course whose relative angle to it is $0$ is the one that is shut.
-
-The laws the function must obey, and what the wind does to a \ship, are in the \MD. In short: from
-one round to the next it holds or turns by one step and never two, so it can never reverse in a
-single round; it takes all six values within any sixty rounds; and the one course whose relative
-angle to it is $3$ is forbidden.
-
-\textbf{The weather seed is not the generation seed.} Both are derived from the game seed, as
-independent streams, and only the weather one is ever given to a \ship. A \ship{} holding the
-generation seed could re-run \texttt{generate} and read off the \treasure{}'s cell without visiting
-a single \island, which would end the game before it began. This is easy to get wrong and invisible
-from outside, so test for it.
+Across consecutive rounds, the wind turns by at most
+one step---never reversing---and covers all six values every sixty rounds. To prevent a \ship{}
+from re-running \texttt{generate} to uncover the \treasure{}'s cell, only the weather seed is shared,
+derived independently from the game seed.
 
 \newpage
 \section{Starting a game}
@@ -517,27 +452,24 @@ from outside, so test for it.
 
 \subsection{There is no handshake}
 
-Nobody dials in, so there is nothing to negotiate. There is no protocol version to check --- every
-component is compiled into the same binary, so a mismatch is a compile error rather than a runtime
-surprise --- no codec to agree on, and no session to resume.
+Because all components are compiled into a single binary, there is no dial-in or negotiation:
+version mismatches are compile errors, with no codec to agree on and no session to resume.
 
-A game is set up by a harness, which builds the \chart, creates one pair of channel endpoints per
-\ship, and spawns one thread for each. A \ship{} is handed its two endpoints and nothing else. It
-cannot acquire any others, and there is nothing for it to connect to.
-
-Everyone who is going to play is present before round one. There is no joining in progress and no
-reconnecting: a \ship{} whose thread dies is a \ship{} that holds position for the rest of the game
-(\fullref{proto:errors}), not one that comes back.
+A harness sets up the game by building the \chart, creating one pair of channel endpoints per
+\ship, and spawning one thread for each. Each \ship{} receives only its two endpoints and cannot
+acquire any others or connect to anything else. All players are present before round one, with no
+mid-game joining or reconnecting: a \ship{} whose thread dies holds position for the rest of the
+game (\fullref{proto:errors}).
 
 \subsection{\texttt{Welcome}}
 
-The first message a \ship{} receives is always \texttt{Welcome}, and it arrives before the first
-\texttt{RoundOpen}. Like everything else a \ship{} receives it is a variant of
-\texttt{AdmiraltyToShip}; the struct below is what that variant carries.
+The first message a \ship{} receives is always \texttt{Welcome}, delivered before the first
+\texttt{RoundOpen} as a variant of \texttt{AdmiraltyToShip} carrying the following struct:
 
 \begin{lstlisting}
 pub struct Welcome {
     pub ship: ShipId,
+    pub roster: Vec<ShipId>
     /// Every numeric rule of this game.
     pub params: Params,
     /// The terrain of every cell. Public, and fixed for the whole game.
@@ -547,44 +479,36 @@ pub struct Welcome {
 }
 \end{lstlisting}
 
-Five things about it.
+Five key rules govern \texttt{Welcome}:
 
-\textbf{\texttt{params} is delivered, not assumed.} This is what allows a \ship{} not to hardcode
-the size of the sea, the strength of a hull, or how many \islands{} --- and therefore how many
-\clues{} --- a game has. A \ship{} that
-ignores this field will fail against a \chart{} configured differently from the one its author
-tested with --- and at the fair it will be running against exactly that.
+\textbf{\texttt{params} is delivered, not assumed.} A \ship{} must not hardcode sea size, hull
+strength, or the number of \islands{} (and therefore \clues{}), otherwise it will fail at the fair
+when run against a differently configured \chart{}.
 
-\textbf{The map is public.} Geography is not a secret: a \ship{} must be able to plan a route, and
-it must be able to enumerate the water cells a \clue{} could be describing (\fullref{proto:clue}).
-What is hidden is where the other \ships are and which cell holds the \treasure{}.
+\textbf{The map is public.} A \ship{} needs the geography to plan routes and to enumerate the water
+cells a \clue{} could describe (\fullref{proto:clue}). Only the other \ships{}' positions and the
+\treasure{}'s cell are hidden.
 
-\textbf{The weather seed is not the world seed.} A \ship{} is given enough to compute the wind of
-any round for itself, so that it can plan a route several rounds ahead. It is emphatically not given
-the seed the \archipelago{} was generated from: that seed determines where the \treasure{} is, and a
-\ship{} holding it could simply re-run generation and sail there. The \chart{} must therefore derive
-two independent streams from the game seed, and only the weather one ever leaves it. This is easy to
-get wrong and impossible to notice from the outside, so it is a requirement rather than a
-suggestion.
+\textbf{The weather seed is not the world seed.} It allows a \ship{} to compute the wind for any
+round and plan routes ahead, without revealing the seed used to generate the \archipelago{} (which
+would let a \ship{} re-run generation and locate the \treasure{}). The \chart{} must derive two
+independent streams from the game seed and only expose the weather seed.
 
-\textbf{The roster is complete and public.} Who is playing is known to everybody from the start.
-Where they are is another matter entirely, and \texttt{Welcome} carries no position.
+\textbf{The roster is complete and public.} Who is playing is known to everyone from the start,
+whereas \texttt{Welcome} carries no position.
 
-\textbf{There is no \texttt{mode} field, and there must not be one.} The \MD{} requires that no
-message a \ship{} receives name the schedule it is being run under, and a field saying so would
-hand it the answer outright. It would also be read: tell a competitor which mode it is in
-and somebody will branch on it, and gain in Sequential what it could not gain in Simultaneous.
-The \cartographer{} is told the mode instead (\cref{proto:cartographer}), because no \ship{} can
-receive a message addressed to it --- which is the whole reason there are four message sets
-(\cref{proto:foursets}).
+\textbf{There is no \texttt{mode} field, and there must not be one.} As required by the \MD{}, no
+message to a \ship{} may reveal the scheduling mode, preventing competitors from branching on it to
+gain an advantage in Sequential mode over Simultaneous. Only the \cartographer{} is told the mode
+(\cref{proto:cartographer}), which is guaranteed not to reach any \ship{} thanks to the four
+separate message sets (\cref{proto:foursets}).
 
 \newpage
 \section{\clues{}}
 \label{proto:clue}
 
-A \clue{} is a predicate over cells. A \clue{} that came from an \island{} is true of the
-\treasure{}'s cell; a \clue{} that came from another \ship{} may be anything at all. The \MD{}
-explains what \clues{} are for and where they come from. This section fixes what one \emph{is}.
+A \clue{} is a predicate applied to cells.
+A \clue{} received from an \island{} is always true with respect to the \treasure{}'s position; a \clue{} obtained from another \ship{}, however, is not necessarily true.
 
 \subsection{The type}
 
@@ -592,28 +516,23 @@ explains what \clues{} are for and where they come from. This section fixes what
 #[non_exhaustive]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Clue {
-    /// No further than `radius` from `centre`.
     Within { centre: Cell, radius: u32 },
-    /// Further than `radius` from `centre`.
     Beyond { centre: Cell, radius: u32 },
-    /// The coordinate on `axis` satisfies `bound`.
     HalfPlane { axis: Axis, bound: Bound },
-    /// Strictly closer to `a` than to `b`.
     Nearer { a: Cell, b: Cell },
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Axis { Q, R, S }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Debug)]
 pub enum Bound { AtLeast(i32), AtMost(i32) }
 
 impl Clue {
-    /// True when this clue is consistent with the treasure lying in `cell`.
     pub fn holds(self, cell: Cell) -> bool {
         match self {
             Clue::Within { centre, radius } => cell.distance(centre) <= radius,
-            Clue::Beyond { centre, radius } => cell.distance(centre) >= radius,
+            Clue::Beyond { centre, radius } => cell.distance(centre) > radius,
             Clue::HalfPlane { axis, bound } => {
                 let v = match axis {
                     Axis::Q => cell.q,
@@ -633,48 +552,20 @@ impl Clue {
 
 \subsection{Why it looks like this}
 
-\textbf{Four variants, and they cut the sea in different shapes.} \texttt{Within} and
-\texttt{Beyond} give discs and their complements, and a pair of them gives an annulus.
-\texttt{HalfPlane} gives a straight cut along one of the three hex axes. \texttt{Nearer} gives a
-perpendicular bisector. Intersecting four \clues{} of the same shape is arithmetic; intersecting
-four of these is a puzzle, which is the point.
+The \texttt{Clue} enum provides \texttt{Within} and \texttt{Beyond} to bound a disc and its complement (forming an annulus when combined), \texttt{HalfPlane} to split the map along one of the three hex axes, and \texttt{Nearer} to trace a perpendicular bisector.
+Recursion is disallowed as it would add unnecessary allocation and evaluation overhead: there is no \texttt{Not(Box<Clue>)} because negation is already intrinsic to the flat variants (\texttt{Beyond} complements \texttt{Within}, and \texttt{Bound} is bidirectional).
 
-\textbf{There is no \texttt{Not(Box<Clue>)}.} Recursion would buy expressiveness the game does not
-need, at the cost of an allocation and a recursive \texttt{holds}. The negations that matter already
-exist as flat variants: \texttt{Beyond} is the complement of \texttt{Within}, and \texttt{Bound}
-gives both directions of a half-plane.
+\textbf{\texttt{holds} requires only the cell:} it is a pure, total, and panic-free function comparing only integers without consulting the map (a \texttt{\&Map} parameter will be added by the \WG{} only if a topology-dependent variant like ``not adjacent to land'' is ever introduced).
 
-\textbf{\texttt{holds} takes a cell and nothing else.} It is pure, it is total, and it cannot
-panic: every arm is a comparison between integers. None of the four variants needs to consult the
-map. Should the \WG{} ever add one that does --- ``not adjacent to land'' is the obvious candidate
---- the signature grows a \texttt{\&Map} at that point and not before.
+\textbf{\texttt{Nearer} names cells, not \islands{}:} \islands{} sit on cells that everybody knows, so \texttt{Cell} is strictly more general and saves a lookup.
+An \island{} can still announce the \clue{} as ``closer to the northern \island{} than to the southern one'', as that is mere presentation and the \island{}'s own business.
 
-\textbf{\texttt{Nearer} names cells, not \islands.} \islands sit on cells that everybody knows, so
-\texttt{Cell} is strictly more general and saves a lookup. An \island{} is still free to announce
-the \clue{} as ``closer to the northern \island{} than to the southern one''; that is presentation,
-and it is the
-\island's business.
+\textbf{Derives and attributes:} \texttt{Ord} and \texttt{Hash} enforce a deterministic iteration order, while \texttt{Copy} avoids ownership overhead for a four-word type.
+Moreover, the variant is part of the \clue{}, not an implementation detail: when an \island{} weakens a \clue{}, it returns the same variant it was given (a weakened \texttt{Nearer} is still a \texttt{Nearer}) by moving a single field, so \texttt{Clue} needs no separate notion of strength.
 
-\textbf{The derives are load-bearing.} \texttt{Ord} and \texttt{Hash} exist so that a collection of
-\clues{} can be put in a deterministic order before anything iterates it, which the determinism
-rules require. \texttt{Copy} exists because a \texttt{Clue} is four words and copying it is cheaper
-than reasoning about who owns it.
-
-\textbf{The variant is part of the \clue, not an implementation detail.} When an \island{} weakens
-a \clue{} it answers with the same variant it was given --- a weakened \texttt{Nearer} is a
-\texttt{Nearer}. That is why weakening is a matter of moving one field, and
-why \texttt{Clue} needs no separate notion of strength.
-
-\textbf{\texttt{\#[non\_exhaustive]} is deliberate}, and it is aimed squarely at \ships. A \ship{}
-should ask a \clue{} whether it holds, never take it apart to see what kind it is. The attribute
-makes that the path of least resistance: a \ship{} that matches on variants must write a \texttt{\_}
-arm, and a \ship{} that leans on \texttt{holds} keeps working unchanged when a fifth variant
-appears.
+\texttt{\#[non\_exhaustive]} pushes \ships{} to evaluate a \clue{} via \texttt{holds} rather than pattern-matching on its variants: a \texttt{match} expression requires a fallback \texttt{\_} arm, whereas calling \texttt{holds} continues to work unchanged even if a fifth variant is introduced.
 
 \subsection{What a \ship{} does with them}
-
-The cells still consistent with a collection of \clues{} are the water cells that satisfy all of
-them:
 
 \begin{lstlisting}
 let candidates: Vec<Cell> = map
@@ -683,19 +574,9 @@ let candidates: Vec<Cell> = map
     .collect();
 \end{lstlisting}
 
-A \ship{} that has read the \MD{} can do better than that in one line. The \treasure{} is never on
-a rock and never adjacent to land, so \texttt{clear\_cells} is the right iterator and the cells
-touching land can go too --- which on a crowded map throws away a good fraction of the sea before
-a single \clue{} is evaluated. The snippet above is correct; it is not the best you can do.
+Because geography is public (cell types --- clear water, rock, \island{} footprint, cliff --- are sent with \texttt{Welcome} and never change, leaving only rival positions and the \treasure{} hidden), a \ship{} can optimize this baseline to plan a route: the \treasure{} never spawns on rocks or adjacent to land, so iterating over \texttt{clear\_cells} and discarding land-adjacent cells prunes the search space before evaluating any \clue{}.
+Moreover, strict conjunction (\texttt{all}) is just a baseline, as a single false \clue{} from a rival will empty \texttt{candidates}.
 
-This requires a \ship{} to know the map, and it does: \textbf{the geography is public}. The kind of
-every cell --- clear water, rock, \island{} footprint, cliff --- is delivered with
-\texttt{Welcome} and never changes. A \ship{} needs it to plan a route in any case. What is hidden
-is where the rivals are, and which single cell holds the \treasure{}.
-
-Note also that the snippet above is the floor and not the ceiling. A \ship{} that does only this has
-nothing left to say the moment \texttt{candidates} comes back empty --- which it will, the first
-time a rival lies to it.
 
 \newpage
 \section{Rounds}
@@ -776,6 +657,24 @@ it cannot express the idea of acting out of turn: there is nothing to pass. Note
 does not achieve --- it keeps honest code correct, and it stops nothing at all in a \ship{} that
 simply stores an old token and sends it again, which is why the \admiralty{} checks the round
 number as well.
+
+The \texttt{action} a \texttt{Submit} carries is one of the actions the \MD{} lists:
+
+\begin{lstlisting}
+#[non_exhaustive]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Action {
+    Move { to: Cell },
+    Moor { island: IslandId },
+    AskClue,
+    Bombard { target: ShipId },
+    ProposeAlliance { to: ShipId },
+    AcceptAlliance { proposer: ShipId },
+    BreakAlliance,
+    Declare,
+    Hold,
+}
+\end{lstlisting}
 
 \subsection{The order of business}
 
@@ -974,8 +873,8 @@ legal, what a view may contain --- is in the \MD{} with the rest of the rules.
 
 \subsection{How they travel}
 
-A \ship{} may send messages to other \ships. They are carried in the \texttt{outbox} of a
-submission and delivered in the \texttt{inbox} of a result.
+Messages are carried from the \texttt{outbox} of a
+submission to the \texttt{inbox} of a result.
 
 \begin{lstlisting}
 /// What a Ship sends.
@@ -996,50 +895,49 @@ pub struct Delivered {
 \end{lstlisting}
 
 \textbf{The sender is stamped by the \admiralty{} and cannot be forged.} A \ship{} chooses what it
-says and to whom; who it is comes from the endpoint the \texttt{Letter} arrived on, and is not a
-field the sender can set. This is the one thing about a message that is guaranteed. Everything in
-it may be a lie; the name on it may not.
+says and to whom; who it is comes from the endpoint the \texttt{Letter} arrived on. Everything else in
+it may be a lie.
 
-\clues{} travel as \texttt{Clue} values rather than as prose, because the receiver has to be able to
-evaluate them (see the \MD). \texttt{text} is for everything else --- promises, threats,
-negotiations --- and nothing in the system reads it but the \ship{} it is addressed to.
+\clues{} travel as \texttt{Clue} values, because the receiver evalueates them. \texttt{text} is for everything else and only the \ship{} it is addressed to read it.
 
 A message sent in round $R$ arrives with the results of round $R$, and can therefore be read before
 choosing an action for round $R+1$. Coordination costs one round of delay.
 
-Sending is not an action: a \ship{} acts and speaks in the same round. The limits are \textbf{3}
+A \ship{} acts and speaks in the same round. The limits are \textbf{3}
 letters per submission, and at most \textbf{4} \clues{} and \textbf{256} characters in each.
-Something must bound it, or six \ships over two hundred rounds will produce logs too large to
-read.
+Something must bound it, otherwise the logs will be too large to read.
 
-A submission that exceeds any of these is \textbf{rejected, not quietly trimmed}. Silently dropping
-the fourth letter would leave a \ship{} believing it had said something it had not, and its author
-hunting a bug in the wrong component. Tell it. Note that the whole submission goes, action
-included: the \ship{} is answered with \texttt{Rejection::TooMuchMail} and recorded as having
-played \texttt{Hold}. Overrunning the cap costs a round.
-
-The \admiralty{} makes a reasonable effort to deliver and no promise. A letter addressed to a
-\ship{} that does not exist, to one that has sunk, or to the sender itself is dropped. There is no
-acknowledgement, no delivery report, and no ordering guarantee between letters from different
-senders.
+A submission that exceeds is \textbf{rejected}.
+% Silently dropping
+%the fourth letter would leave a \ship{} believing it had said something it had not, and its author
+%hunting a bug in the wrong component. Tell it. Note that the whole submission goes, action
+%included: the \ship{} is answered with \texttt{Rejection::TooMuchMail} and recorded as having
+%played \texttt{Hold}. 
+Overrunning the cap costs a round.
+The \admiralty{} delivery is not guaranteed, because there is no acknowledgement or delivery report. Also, ordering is not guaranteed.
+% The \admiralty{} makes a reasonable effort to deliver and no promise. A letter addressed to a
+% \ship{} that does not exist, to one that has sunk, or to the sender itself is dropped. There is no
+% acknowledgement, no delivery report, and no ordering guarantee between letters from different
+% senders.
 
 \subsection{Why it is relayed and not direct}
 
-Because two independently written student components that wait on each other will wait forever. A
-\ship{} blocked on a peer during its own round stalls nothing but itself --- the \admiralty{} will
-time it out --- but a \ship{} that has staked its turn on an answer that never comes has wasted the
-round, and at the fair it will do so in front of an audience.
+A \ship{} is responsible for making progress without waiting indefinitely for a response. If it
+stalls while waiting for another \ship{}, the \admiralty{} may time it out; the \ship{} loses the
+round.
 
-Uncooperativeness is also a legitimate strategy here. A \ship{} that depends on being answered is a
-\ship{} its rivals can freeze simply by saying nothing, and the relay is what keeps that from being
-a winning move: the mail never blocks anybody, because nobody ever waits for it.
+Uncooperativeness is also a legitimate strategy here. A rival may refuse to answer a request,
+withhold information, or send a message that is deliberately unhelpful. That may prevent
+coordination, but it must not prevent the other \ship{} from taking its own action: a \ship{} that
+depends on being answered could otherwise be frozen simply by silence. This is why the relay is
+non-blocking: sending a letter does not wait for delivery or acknowledgement, and a \ship{} continues
+to play even when every rival ignores it.
 
 \subsection{The two rules}
 
 \begin{description}
     \item[A message may never be a precondition for the legality of an action.] The \chart{}
-      decides legality from its own state alone. It never sees a message and does not know any were
-      exchanged. Anything agreed between \ships must be re-stated as an ordinary action to have any
+      decides legality from its state. Every \ships agreement must be re-stated as an ordinary action to have any
       effect.
     \item[A \ship{} must remain fully playable if every other \ship{} ignores it forever.] This is
       tested: a \ship{} is run in a game where no peer ever replies, and must complete it within the
@@ -1051,13 +949,15 @@ and not advice.
 
 \subsection{What this is for}
 
-The consequence is the point of the whole arrangement: \textbf{what is negotiated is private and
-cannot be verified; what is done is public and is validated.}
+\textbf{Negotiations are private and what is done is public and is validated.}
 
-You can tell another \ship{} that an \island{} swore the \treasure{} lies east of a given line, and
-it cannot check. You can agree to attack on round forty and simply not turn up. The \admiralty{}
-sees who fired; it never knew a promise existed, and cannot be appealed to. Deception is not an
-exploit here. It is the mechanic.
+% You can tell another \ship{} that an \island{} swore the \treasure{} lies east of a given line, and
+% it cannot check. You can agree to attack on round forty and simply not turn up. The \admiralty{}
+% sees who fired; it never knew a promise existed, and cannot be appealed to. Deception is not an
+% exploit here. It is the mechanic.
+% 
+% This is an AI example for sure, i keep it commented if is useful for someone.
+
 
 \newpage
 \section{The \cartographer}
