@@ -800,6 +800,39 @@ groups must agree on as any message, and the reason it is in this document rathe
 inside whoever wrote the \chart.
 
 \begin{lstlisting}
+// Rely on `thiserror' crate
+use thiserror::Error;
+
+#[non_exhaustive]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+/// Generator error item
+pub enum GenErrItem {
+    Island,
+    Cliff,
+    Rock,
+    Treasure
+}
+
+#[non_exhaustive]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Error)]
+/// Generator error
+pub enum GenError {
+    /// Fails step 2
+    #[error("`archipelago_radius` <= `vision_range`.")]
+    VisionRangeTooHigh,
+    /// Fails steps 3-5 and 7
+    #[error("Cannot place `{item:?}`, the sea might be too crowded.")]
+    CantPlace{
+        item: GenErrItem 
+    },
+    /// Fails step 6
+    #[error("The water is not connected by clear water alone.")]
+    WaterNotConnected,
+    /// Fails step 9
+    #[error("The Clues do not narrow the sea down to a single cell.")]
+    Unsolvable,
+}
+
 pub trait Chart: Sized {
     fn generate(seed: Seed, params: &Params) -> Result<Self, GenError>;
 
