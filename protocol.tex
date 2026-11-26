@@ -800,6 +800,33 @@ groups must agree on as any message, and the reason it is in this document rathe
 inside whoever wrote the \chart.
 
 \begin{lstlisting}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct ShipStanding {
+    pub ship: ShipId,
+    pub full_clues: u8,
+    /// None if still afloat at game end; Some(r) if sunk on round r.
+    pub sunk_round: Option<Round>,
+}
+
+#[non_exhaustive]
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum Outcome {
+    /// A Ship declared the Treasure's cell correctly.
+    Declared {
+        winner: ShipId,
+        treasure: Cell,
+    },
+    /// The round limit was reached without a correct declaration.
+    RoundCap {
+        ranking: [ShipStanding; 6],
+    },
+    /// Every Ship sank before a correct declaration or the round cap.
+    AllSunk {
+        ranking: [ShipStanding; 6],
+    },
+}
+
 pub struct Report {
     pub to: BTreeSet<ShipId>,
     pub event: Event,
