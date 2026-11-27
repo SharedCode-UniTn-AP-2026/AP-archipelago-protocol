@@ -752,43 +752,39 @@ stalled, which is what a game of six thinking players needs.
 \subsection{Conflicts}
 \label{proto:conflicts}
 
-Simultaneous rounds allow what Sequential cannot: two \ships claiming the last berth, or firing on
-each other at once.
+Simultaneous rounds allow actions that Sequential rounds do not, such as two \ships competing for
+the last berth or attacking each other at the same time.
 
 \textbf{The \WG{} must standardise a total, deterministic order over the submissions of a round,
-and the outcome of every class of conflict.} It is not enough for the order to be deterministic
-within one implementation: it must be the same order in every implementation, or the same
-submissions will produce different games and neither replay nor any comparison between
-implementations will mean anything. The same order also fixes the sequence in which Sequential
-asks (\cref{proto:modes}), so this one decision governs both modes.
+and the outcome of every class of conflict.} All implementations must use the same order, or the
+same submissions will produce different games, making replays and comparisons meaningless. This order
+also determines the sequence of Sequential actions (\cref{proto:modes}), so it applies to both
+modes.
 
-The order must be a function of information every implementation has. Arrival order is not: it
-depends on which thread the operating system happened to wake first, which is precisely the
-nondeterminism this project forbids. Plausible bases are the \ship{} identifier, or a permutation
-derived from the seed and the round number --- the latter being fairer, since it does not advantage
-a low identifier for the whole game.
+The order must use only information every implementation has. Arrival order is excluded because it
+depends on which thread the operating system wakes first, so it is not deterministic. Possible bases
+are the \ship{} identifier or, more fairly, a permutation derived from the seed and round number,
+which does not always favour low identifiers.
 
-Conflicts the \WG{} must give an answer for, at least:
+The \WG{} must resolve at least these conflicts:
 
 \begin{itemize}
-    \item two \ships moving into the same cell, which only one may have: cells are exclusive;
-    \item a \ship{} moving into the cell another \ship{} is leaving in the same round, which
-      succeeds or fails purely according to which of the two is applied first;
+    \item two \ships moving into the same cell, which only one may occupy;
+    \item a \ship{} moves into a cell another \ship{} is leaving, and the result depends on which
+      action happens first;
     \item more \ships mooring than there are berths;
-    \item two \ships bombarding each other, when the first shot would sink the second: does the
-      second shot happen;
-    \item two \ships landing a killing blow on the same target, which decides who inherits the
-      victim's \clues{};
-    \item a \ship{} moving out of a cell that another \ship{} is firing into.
+    \item two \ships bombarding each other: if the first shot would sink the second,
+      does the second shot happen?
+    \item two \ships landing a killing blow on the same target: who inherits the victim's \clues{}?
+    \item a \ship{} leaving a cell that another is firing into.
 \end{itemize}
 
-Declarations are not on that list, and it is worth knowing why: \texttt{Declare} names the \ship's
-own cell and cells are exclusive, so two \ships can never both be right in the same round.
+Declarations are not listed: \texttt{Declare} names the \ship's own cell and cells are exclusive, so
+two \ships can never both be right in the same round.
 
-The killing blow deserves a moment. Two \ships have hunted the same rival for forty rounds and both
-fire the shot that sinks it in the same round; only one of them inherits everything that \ship{}
-knew. Which one is decided entirely by the conflict rule. It is the most consequential sentence the
-\WG{} will write, and it will be written in a meeting about tie-breaking.
+The killing blow is crucial: if two \ships{} that hunted a rival for forty rounds sink it in the same round,
+the conflict rule alone decides who inherits all the victim knew. That rule is the most
+consequential sentence the \WG{} will write, in a meeting about tie-breaking.
 
 \newpage
 \section{The \chart's interface}
