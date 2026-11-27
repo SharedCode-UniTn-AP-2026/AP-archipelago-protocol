@@ -633,30 +633,24 @@ pub enum EndReason {
 }
 \end{lstlisting}
 
-\textbf{There is no variant for ``everybody sank''}, and adding one would be a mistake. The \MD{}
-ends the game when no \ship{} is left afloat, but by then all six have already been told
-\texttt{Sunk} at the moment they went down, and each receives exactly one \texttt{GameOver}. There
-is nobody left to deliver a seventh message to. That ending is visible to the \chart{}, through
-\texttt{outcome}, and to the \cartographer{} --- and to nobody else, because there is no longer
-anybody else.
+\textbf{There is no variant for ``everybody sank''}, and adding one would be a mistake. When all six
+\ship{}s sink, the game ends because each has already received \texttt{Sunk} upon elimination and
+exactly one \texttt{GameOver}, leaving nobody to receive a seventh message. That ending is visible
+only to the \chart{}, through \texttt{outcome}, and to the \cartographer{}.
 
-\texttt{deadline\_ms} is a duration and not a moment, so that a \ship{} never has to read a clock
-to know how long it has. It is measured by the \admiralty{} from the point of sending.
+\texttt{deadline\_ms} is a duration rather than a timestamp, measured by the \admiralty{} from the
+point of sending, so a \ship{} never needs to read a clock.
 
-\textbf{\texttt{GameOver} is what lets a \ship{} thread stop.} Without it a sunk \ship{} would
-simply stop receiving \texttt{RoundOpen} and would block for ever on an endpoint nobody will
-write to again --- which is the one failure this project spends a whole section forbidding. The
-\MD{} requires that a sunk \ship{} be told its game is over; this is the message that tells it.
-Every \ship{} receives exactly one, and receives nothing afterwards.
+\textbf{\texttt{GameOver} is what lets a \ship{} thread stop.} Without it, a sunk \ship{} would
+stop receiving \texttt{RoundOpen} and block forever on an inactive endpoint. Every \ship{} receives
+exactly one \texttt{GameOver} and nothing afterwards.
 
-A \ship{} that is told \texttt{Sunk} is out while the game runs on. It should drop its endpoints
-and return; it must not keep submitting, and anything it does send is discarded.
+A \ship{} notified with \texttt{Sunk} is out while the game runs on: it must drop its endpoints,
+return, and stop submitting (any further messages it sends are discarded).
 
-\texttt{TurnToken} is issued with the round and consumed by the submission. A \ship{} built around
-it cannot express the idea of acting out of turn: there is nothing to pass. Note what this does and
-does not achieve --- it keeps honest code correct, and it stops nothing at all in a \ship{} that
-simply stores an old token and sends it again, which is why the \admiralty{} checks the round
-number as well.
+\texttt{TurnToken} is issued with each round and consumed upon submission, preventing honest code
+from acting out of turn. Because it cannot stop a \ship{} from storing and replaying an old token,
+the \admiralty{} also validates the round number.
 
 The \texttt{action} a \texttt{Submit} carries is one of the actions the \MD{} lists:
 
@@ -678,76 +672,61 @@ pub enum Action {
 
 \subsection{The order of business}
 
-For each round the \admiralty:
+In Simultaneous mode, each round follows six steps carried out by the \admiralty{}:
 
 \begin{enumerate}
-    \item sends \texttt{RoundOpen} to every \ship{} still afloat, each with its
-      own \texttt{ShipView} obtained from the \chart;
-    \item collects submissions until the deadline;
-    \item for each submission, in the standardised order (\fullref{proto:conflicts}), asks the
-      \chart{} to validate and then \emph{immediately} to apply, answering a refusal with
-      \texttt{Rejected};
-    \item calls \texttt{advance\_round}, the \chart's end-of-round step;
-    \item sends every \ship{} a \texttt{RoundResult} carrying its own view and its own inbox;
-    \item sends the \cartographer{} the complete state.
+    \item send \texttt{RoundOpen} to every afloat \ship{} with its own \texttt{ShipView} from the \chart{};
+    \item collect submissions until the deadline;
+    \item for each submission, in the standardised order, ask the \chart{} to validate and
+      \emph{immediately} apply it, replying \texttt{Rejected} on refusal;
+    \item call \texttt{advance\_round} (the \chart{}'s end-of-round step);
+    \item send every \ship{} a \texttt{RoundResult} with its own view and inbox;
+    \item send the complete state to the \cartographer{}.
 \end{enumerate}
 
-That is the order in Simultaneous mode.
+Validation and application in step 3 must be strictly adjacent. Because \texttt{ValidatedAction}
+carries no round or state version, the type system cannot stop an \admiralty{} from batch-validating
+all six submissions before applying them --- which could place two \ships{} in the same cell, since
+the second move would be checked against a stale state before the first moved. Legality is judged at
+application time, so nothing may come between validate and apply.
 
-Step 3 says \emph{immediately} for a reason. A \texttt{ValidatedAction} carries no round and no
-state version, so nothing in the type system stops an \admiralty{} from validating all six
-submissions and then applying all six --- and that \admiralty{} will put two \ships{} in one cell,
-because the second move was judged against a sea the first had not yet moved in. The \MD{} judges
-legality at the moment an action is applied; validate and apply must therefore be adjacent, with
-nothing in between.
-
-A \ship{} that has not answered by the deadline is recorded as having played \texttt{Hold}. It is
-never removed from the game for being slow. A thread that thinks too hard, blocks, or dies must not
-be able to stop the game for everybody else.
+Any \ship{} that misses the deadline is recorded as playing \texttt{Hold} and is never removed for
+being slow: a sluggish, blocked, or dead thread must never halt the game for everyone else.
 
 \subsection{Two modes, one \ship}
 \label{proto:modes}
 
-The \admiralty{} runs in one of two modes:
+The \admiralty{} operates in one of two \texttt{TurnMode}s:
 
 \begin{lstlisting}
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum TurnMode { Sequential, Simultaneous }
 \end{lstlisting}
 
-In \textbf{Sequential} the round is opened for one \ship. In \textbf{Simultaneous} it is opened
-for all of them.
+In \textbf{Sequential}, a round opens for one \ship{}; in \textbf{Simultaneous}, it opens for all
+of them. \textbf{No message sent to a \ship{} may name the mode}, because scheduling belongs solely
+to the \admiralty{}. Only the \cartographer{} is informed so it can accurately display what it is
+rendering.
 
-\textbf{No message a \ship{} receives names the mode, and none may be added that does.} The mode is
-a scheduling decision belonging to the \admiralty. The
-\cartographer{} is told, because it draws the game and must be able to say what it is looking at.
-
-This works because \texttt{RoundOpen} does not say ``it is your turn''. It says: round $R$ is open,
-here is what you can see, answer within this long. Whether one \ship{} received that message or
-all six did is not visible to any of them. The \ship{} code is identical.
-
-Four rules keep it that way. Each is load-bearing; drop any one and the modes stop being
-interchangeable:
+This transparency works because \texttt{RoundOpen} never means ``it is your turn'' --- it only
+states that round $R$ is open, provides the \ship{}'s view, and sets a deadline. Whether one or all
+six \ships{} received it is invisible, keeping \ship{} code identical across modes. Four
+load-bearing rules preserve this interchangeability (dropping any breaks it):
 
 \begin{itemize}
-    \item no message a \ship{} can receive carries the mode, and none may be added that does;
-    \item \texttt{RoundOpen} carries the round number and a deadline, and never implies
-      exclusivity;
-    \item every \texttt{Submit} names its round, and a submission naming a closed round is
-      discarded;
-    \item results are per-\ship{} and keyed by round, so a \ship{} can always tell which round it is
-      being told about.
+    \item no message a \ship{} receives carries the mode, and none may be added;
+    \item \texttt{RoundOpen} carries the round number and deadline without implying exclusivity;
+    \item every \texttt{Submit} names its round, and submissions for closed rounds are discarded;
+    \item results are per-\ship{} and keyed by round, so a \ship{} always knows which round they
+      belong to.
 \end{itemize}
 
-The \MD{} is careful about how far this goes, and so should you be. The modes are not
-statistically identical --- a \ship{} in Sequential is never refused a cell a rival took in the
-same round --- so a \ship{} that collected its rejections could form an opinion. The requirement
-is that nothing tells it and that no \ship{} acts on a guess. Do not design a message that would
-make the guess unnecessary.
-
-Sequential exists because it is reproducible and easy to follow: it is the mode for testing and for
-examinations. Simultaneous exists because a round takes the same time however many \ships have
-stalled, which is what a game of six thinking players needs.
+The two modes are not statistically identical (in Sequential, a \ship{} is never refused a cell
+taken by a rival in the same round), so a \ship{} logging rejections could infer the mode. The
+requirement is therefore that nothing reveals it, no \ship{} acts on a guess, and no message is
+designed to expose it. Finally, Sequential exists for reproducibility and clarity (testing and
+examinations), whereas Simultaneous keeps round duration bounded regardless of how many \ships{}
+stall (essential for six thinking players).
 
 \subsection{Conflicts}
 \label{proto:conflicts}
