@@ -269,22 +269,22 @@ pub enum Terrain {
 }
 
 /// The terrain of every cell, and nothing else. Public and fixed for the game.
-pub struct Map { /* ... */ }
-
-impl Map {
-    pub fn radius(&self) -> u32;
-    pub fn contains(&self, cell: Cell) -> bool;
-    pub fn terrain(&self, cell: Cell) -> Option<Terrain>;
-    pub fn is_land(&self, cell: Cell) -> bool;
-    pub fn is_water(&self, cell: Cell) -> bool;
+pub trait Map {
+    fn radius(&self) -> u32;
+    fn contains(&self, cell: Cell) -> bool;
+    fn terrain(&self, cell: Cell) -> Option<Terrain>;
+    fn is_land(&self, cell: Cell) -> bool;
+    fn is_water(&self, cell: Cell) -> bool;
     /// The six corners, in direction order (counter-clockwise, East is the first). Ship i starts on corner i.
-    pub fn corners(&self) -> [Cell; 6];
+    fn corners(&self) -> [Cell; 6];
     /// Every cell in the sea, in a fixed order. Clear water and rocks.
-    pub fn water_cells(&self) -> impl Iterator<Item = Cell> + '_;
+    fn water_cells(&self) -> impl Iterator<Item = Cell> + '_;
     /// Water that is not a rock.
-    pub fn clear_cells(&self) -> impl Iterator<Item = Cell> + '_;
+    fn clear_cells(&self) -> impl Iterator<Item = Cell> + '_;
 }
 \end{lstlisting}
+
+The implementors of the \textbf{Map} trait need to guarantee that all the methods that return an \texttt{Iterator} have a deterministic iteration order (see the \MD{} on determinism).
 
 \textbf{Land} (\texttt{Island}, \texttt{Cliff}) cannot be entered and blocks sight; \textbf{water} (\texttt{Clear}, \texttt{Rock}) can be entered and does not. A rock differs from clear water only in the cost of entering it.
 
@@ -438,8 +438,8 @@ pub fn wind_at(weather_seed: Seed, round: Round) -> Direction;
 \end{lstlisting}
 
 This allows a \ship{} to compute future rounds directly with no accumulated state to drift.
-The returned \texttt{Direction} indicates where the wind blows from, shutting the course whose
-relative angle to it is $0$ (opposite to the wind).
+The returned \texttt{Direction} indicates where the wind blows towards, shutting the course whose
+relative angle to it is $3$ (opposite to the wind).
 
 Across consecutive rounds, the wind turns by at most
 one step---never reversing---and covers all six values every sixty rounds. To prevent a \ship{}
@@ -731,43 +731,39 @@ stall (essential for six thinking players).
 \subsection{Conflicts}
 \label{proto:conflicts}
 
-Simultaneous rounds allow what Sequential cannot: two \ships claiming the last berth, or firing on
-each other at once.
+Simultaneous rounds allow actions that Sequential rounds do not, such as two \ships competing for
+the last berth or attacking each other at the same time.
 
 \textbf{The \WG{} must standardise a total, deterministic order over the submissions of a round,
-and the outcome of every class of conflict.} It is not enough for the order to be deterministic
-within one implementation: it must be the same order in every implementation, or the same
-submissions will produce different games and neither replay nor any comparison between
-implementations will mean anything. The same order also fixes the sequence in which Sequential
-asks (\cref{proto:modes}), so this one decision governs both modes.
+and the outcome of every class of conflict.} All implementations must use the same order, or the
+same submissions will produce different games, making replays and comparisons meaningless. This order
+also determines the sequence of Sequential actions (\cref{proto:modes}), so it applies to both
+modes.
 
-The order must be a function of information every implementation has. Arrival order is not: it
-depends on which thread the operating system happened to wake first, which is precisely the
-nondeterminism this project forbids. Plausible bases are the \ship{} identifier, or a permutation
-derived from the seed and the round number --- the latter being fairer, since it does not advantage
-a low identifier for the whole game.
+The order must use only information every implementation has. Arrival order is excluded because it
+depends on which thread the operating system wakes first, so it is not deterministic. Possible bases
+are the \ship{} identifier or, more fairly, a permutation derived from the seed and round number,
+which does not always favour low identifiers.
 
-Conflicts the \WG{} must give an answer for, at least:
+The \WG{} must resolve at least these conflicts:
 
 \begin{itemize}
-    \item two \ships moving into the same cell, which only one may have: cells are exclusive;
-    \item a \ship{} moving into the cell another \ship{} is leaving in the same round, which
-      succeeds or fails purely according to which of the two is applied first;
+    \item two \ships moving into the same cell, which only one may occupy;
+    \item a \ship{} moves into a cell another \ship{} is leaving, and the result depends on which
+      action happens first;
     \item more \ships mooring than there are berths;
-    \item two \ships bombarding each other, when the first shot would sink the second: does the
-      second shot happen;
-    \item two \ships landing a killing blow on the same target, which decides who inherits the
-      victim's \clues{};
-    \item a \ship{} moving out of a cell that another \ship{} is firing into.
+    \item two \ships bombarding each other: if the first shot would sink the second,
+      does the second shot happen?
+    \item two \ships landing a killing blow on the same target: who inherits the victim's \clues{}?
+    \item a \ship{} leaving a cell that another is firing into.
 \end{itemize}
 
-Declarations are not on that list, and it is worth knowing why: \texttt{Declare} names the \ship's
-own cell and cells are exclusive, so two \ships can never both be right in the same round.
+Declarations are not listed: \texttt{Declare} names the \ship's own cell and cells are exclusive, so
+two \ships can never both be right in the same round.
 
-The killing blow deserves a moment. Two \ships have hunted the same rival for forty rounds and both
-fire the shot that sinks it in the same round; only one of them inherits everything that \ship{}
-knew. Which one is decided entirely by the conflict rule. It is the most consequential sentence the
-\WG{} will write, and it will be written in a meeting about tie-breaking.
+The killing blow is crucial: if two \ships{} that hunted a rival for forty rounds sink it in the same round,
+the conflict rule alone decides who inherits all the victim knew. That rule is the most
+consequential sentence the \WG{} will write, in a meeting about tie-breaking.
 
 \newpage
 \section{The \chart's interface}
@@ -779,26 +775,38 @@ groups must agree on as any message, and the reason it is in this document rathe
 inside whoever wrote the \chart.
 
 \begin{lstlisting}
-impl Chart {
-    pub fn generate(seed: Seed, params: &Params) -> Result<Chart, GenError>;
+pub struct Report {
+    pub to: BTreeSet<ShipId>,
+    pub event: Event,
+}
+
+pub trait Chart: Sized {
+    type ValidatedAction: Debug;
+
+    fn generate(seed: Seed, params: &Params) -> Result<Self, GenError>;
 
     /// Decide whether an action is legal. The only way to obtain a ValidatedAction.
-    pub fn validate(&self, ship: ShipId, action: &Action)
-        -> Result<ValidatedAction, Rejection>;
+    fn validate(&self, ship: ShipId, action: &Action)
+        -> Result<Self::ValidatedAction, Rejection>;
 
     /// Apply an already validated action. Cannot fail.
-    pub fn apply(&mut self, action: ValidatedAction) -> Vec<Event>;
+    fn apply(&mut self, action: Self::ValidatedAction) -> Vec<Report>;
 
     /// End of round: the round number advances and the Islands take their turn.
-    pub fn advance_round(&mut self) -> Vec<Event>;
+    fn advance_round(&mut self) -> Vec<Report>;
 
     /// What a Ship is permitted to see.
-    pub fn view_for(&self, ship: ShipId) -> ShipView;
+    fn view_for(&self, ship: ShipId) -> Option<ShipView>;
 
     /// What a spectator sees: everything.
-    pub fn spectator_view(&self) -> SpectatorView;
+    fn spectator_view(&self) -> SpectatorView;
 
-    pub fn outcome(&self) -> Option<Outcome>;
+    fn outcome(&self) -> Option<Outcome>;
+
+    fn params(&self) -> Params;
+    fn map(&self) -> &impl Map;
+    fn weather_seed(&self) -> Seed;
+    fn round(&self) -> Round;
 }
 \end{lstlisting}
 
@@ -1133,5 +1141,18 @@ before \texttt{Welcome}, or arrives from somebody who should not be able to send
 states a \ship{} can be in --- sailing, moored, sunk --- and look for the transitions nobody has
 named. The problems worth finding are almost never in a single message; they are in two features
 that were each specified alone.
+
+\newpage
+\section{WG choices}
+\label{proto:wgchoices}
+
+The choices of the \WG{} that do not have a section of their own.
+
+\subsection{Channel library}
+\label{proto:channels}
+
+Every component uses the channels of \texttt{crossbeam-channel}
+(\url{https://docs.rs/crossbeam-channel/}) and is written with threads. No asynchronous runtime
+is used.
 
 \end{document}
